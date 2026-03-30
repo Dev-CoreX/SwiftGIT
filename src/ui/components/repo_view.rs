@@ -410,7 +410,6 @@ fn render_diff(f: &mut Frame, area: Rect, s: &RepoViewState) {
 /// Diff theme renderer — all colors sourced from src/ui/theme.rs.
 /// To change any color: edit the corresponding SYN_* or DIFF_* constant in theme.rs, rebuild.
 fn render_diff_lines(content: &str) -> Vec<Line<'static>> {
-    use ratatui::style::Color;
 
     // Short aliases pointing to theme.rs public constants
     let add_bg    = DIFF_ADD_BG;

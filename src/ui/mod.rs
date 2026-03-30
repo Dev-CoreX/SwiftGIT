@@ -706,6 +706,7 @@ async fn event_loop(
             }
             terminal.draw(|f| {
                 let area = f.size();
+                // Ensure the background is always drawn first
                 f.render_widget(
                     ratatui::widgets::Block::default()
                         .style(ratatui::style::Style::default().bg(theme::BG_COLOR)),
@@ -1251,67 +1252,70 @@ async fn handle_clone_input(key: KeyEvent, state: Arc<Mutex<AppState>>) -> Resul
                     s.mode = AppMode::Loading;
                 }
 
-                // Fetch file list in a blocking task
+                // Fetch file list in a background task
+                let state_c = Arc::clone(&state);
                 let owner_c = owner.clone();
                 let repo_c = repo_name.clone();
                 let tok = token.clone();
-                let files_result = tokio::task::spawn_blocking(move || {
-                    crate::git::fetch_github_files(&owner_c, &repo_c, tok.as_deref())
-                }).await?;
+                tokio::task::spawn(async move {
+                    let files_result = tokio::task::spawn_blocking(move || {
+                        crate::git::fetch_github_files(&owner_c, &repo_c, tok.as_deref())
+                    }).await;
 
-                let mut s = state.lock().await;
-                s.is_loading = false;
-                match files_result {
-                    Ok(files) => {
-                        s.ghgrab_files = files;
-                        s.mode = AppMode::GhGrab;
+                    let mut s = state_c.lock().await;
+                    s.is_loading = false;
+                    match files_result {
+                        Ok(Ok(files)) => {
+                            s.ghgrab_files = files;
+                            s.mode = AppMode::GhGrab;
+                        }
+                        _ => {
+                            s.show_toast("Failed to fetch files", ToastType::Error);
+                            s.mode = AppMode::CloneInput;
+                        }
                     }
-                    Err(e) => {
-                        s.show_toast(format!("Failed to fetch files: {}", e), ToastType::Error);
-                        s.mode = AppMode::CloneInput;
-                    }
-                }
+                });
             } else {
                 // Non-GitHub or SSH URL — full clone immediately
                 {
                     let mut s = state.lock().await;
                     s.loading_label = format!("Cloning {}...", url);
+                    s.is_loading = true;
                     s.mode = AppMode::Loading;
                 }
 
                 let url_c = url.clone();
+                let state_c = Arc::clone(&state);
                 let clone_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join("swiftgit-repos");
                 let _ = std::fs::create_dir_all(&clone_dir);
                 let clone_dir_c = clone_dir.clone();
 
-                let output = tokio::task::spawn_blocking(move || {
-                    std::process::Command::new("git")
-                        .args(["clone", &url_c])
-                        .current_dir(&clone_dir_c)
-                        .output()
-                }).await?;
+                tokio::task::spawn(async move {
+                    let output = tokio::task::spawn_blocking(move || {
+                        std::process::Command::new("git")
+                            .args(["clone", &url_c])
+                            .current_dir(&clone_dir_c)
+                            .output()
+                    }).await;
 
-                let mut s = state.lock().await;
-                match output {
-                    Ok(out) if out.status.success() => {
-                        let repo_name = url.trim_end_matches('/').split('/').next_back()
-                            .unwrap_or("repo").trim_end_matches(".git").to_string();
-                        let repo_path = clone_dir.join(&repo_name);
-                        match s.open_repo(repo_path) {
-                            Ok(_) => s.show_toast(format!("Cloned: {}", repo_name), ToastType::Success),
-                            Err(e) => { s.mode = AppMode::Dashboard; s.show_toast(format!("{}", e), ToastType::Warning); }
+                    let mut s = state_c.lock().await;
+                    s.is_loading = false;
+                    match output {
+                        Ok(Ok(out)) if out.status.success() => {
+                            let repo_name = url.trim_end_matches('/').split('/').next_back()
+                                .unwrap_or("repo").trim_end_matches(".git").to_string();
+                            let repo_path = clone_dir.join(&repo_name);
+                            match s.open_repo(repo_path) {
+                                Ok(_) => s.show_toast(format!("Cloned: {}", repo_name), ToastType::Success),
+                                Err(e) => { s.mode = AppMode::Dashboard; s.show_toast(format!("{}", e), ToastType::Warning); }
+                            }
+                        }
+                        _ => {
+                            s.mode = AppMode::Dashboard;
+                            s.show_toast("Clone failed", ToastType::Error);
                         }
                     }
-                    Ok(out) => {
-                        let err = String::from_utf8_lossy(&out.stderr).to_string();
-                        s.mode = AppMode::Dashboard;
-                        s.show_toast(format!("Clone failed: {}", err.trim()), ToastType::Error);
-                    }
-                    Err(e) => {
-                        s.mode = AppMode::Dashboard;
-                        s.show_toast(format!("git error: {}", e), ToastType::Error);
-                    }
-                }
+                });
             }
         }
         KeyCode::Backspace => {
@@ -1462,40 +1466,38 @@ async fn handle_ghgrab(key: KeyEvent, state: Arc<Mutex<AppState>>) -> Result<boo
                 s.mode = AppMode::Loading;
             }
 
+            let state_c = Arc::clone(&state);
             let clone_dir = dirs::home_dir().unwrap_or_default().join("swiftgit-repos");
             let _ = std::fs::create_dir_all(&clone_dir);
             let clone_dir_c = clone_dir.clone();
             let url_c = url.clone();
 
-            let output = tokio::task::spawn_blocking(move || {
-                std::process::Command::new("git")
-                    .args(["clone", &url_c])
-                    .current_dir(&clone_dir_c)
-                    .output()
-            }).await?;
+            tokio::task::spawn(async move {
+                let output = tokio::task::spawn_blocking(move || {
+                    std::process::Command::new("git")
+                        .args(["clone", &url_c])
+                        .current_dir(&clone_dir_c)
+                        .output()
+                }).await;
 
-            let mut s = state.lock().await;
-            s.is_loading = false;
-            match output {
-                Ok(out) if out.status.success() => {
-                    let rname = url.trim_end_matches('/').split('/').next_back()
-                        .unwrap_or("repo").trim_end_matches(".git").to_string();
-                    let rpath = clone_dir.join(&rname);
-                    match s.open_repo(rpath) {
-                        Ok(_) => s.show_toast(format!("Cloned all: {}", rname), ToastType::Success),
-                        Err(e) => { s.mode = AppMode::Dashboard; s.show_toast(format!("{}", e), ToastType::Warning); }
+                let mut s = state_c.lock().await;
+                s.is_loading = false;
+                match output {
+                    Ok(Ok(out)) if out.status.success() => {
+                        let rname = url.trim_end_matches('/').split('/').next_back()
+                            .unwrap_or("repo").trim_end_matches(".git").to_string();
+                        let rpath = clone_dir.join(&rname);
+                        match s.open_repo(rpath) {
+                            Ok(_) => s.show_toast(format!("Cloned all: {}", rname), ToastType::Success),
+                            Err(e) => { s.mode = AppMode::Dashboard; s.show_toast(format!("{}", e), ToastType::Warning); }
+                        }
+                    }
+                    _ => {
+                        s.mode = AppMode::Dashboard;
+                        s.show_toast("Clone failed", ToastType::Error);
                     }
                 }
-                Ok(out) => {
-                    let err = String::from_utf8_lossy(&out.stderr).to_string();
-                    s.mode = AppMode::Dashboard;
-                    s.show_toast(format!("Clone failed: {}", err.trim()), ToastType::Error);
-                }
-                Err(e) => {
-                    s.mode = AppMode::Dashboard;
-                    s.show_toast(format!("Error: {}", e), ToastType::Error);
-                }
-            }
+            });
         }
         KeyCode::Char('d') => {
             // 'd' = Download only selected files
@@ -1520,6 +1522,7 @@ async fn handle_ghgrab(key: KeyEvent, state: Arc<Mutex<AppState>>) -> Result<boo
                 s.mode = AppMode::Loading;
             }
 
+            let state_c = Arc::clone(&state);
             let dest_dir = dirs::home_dir().unwrap_or_default()
                 .join("swiftgit-repos")
                 .join(&repo_name);
@@ -1531,26 +1534,36 @@ async fn handle_ghgrab(key: KeyEvent, state: Arc<Mutex<AppState>>) -> Result<boo
             let dest_c = dest_dir.clone();
             let selected_c = selected.clone();
 
-            let result = tokio::task::spawn_blocking(move || {
-                let mut errors = Vec::new();
-                for path in &selected_c {
-                    if let Err(e) = crate::git::download_github_file(&owner_c, &repo_c, path, &dest_c, tok_c.as_deref()) {
-                        errors.push(format!("{}: {}", path, e));
+            tokio::task::spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    let mut errors = Vec::new();
+                    for path in &selected_c {
+                        if let Err(e) = crate::git::download_github_file(&owner_c, &repo_c, path, &dest_c, tok_c.as_deref()) {
+                            errors.push(format!("{}: {}", path, e));
+                        }
+                    }
+                    errors
+                }).await;
+
+                let mut s = state_c.lock().await;
+                s.is_loading = false;
+
+                match result {
+                    Ok(errors) => {
+                        if !errors.is_empty() {
+                            s.mode = AppMode::Dashboard;
+                            s.show_toast(format!("{} error(s) during download", errors.len()), ToastType::Warning);
+                        } else {
+                            s.show_toast(format!("Downloaded {} file(s) to ~/swiftgit-repos/{}", selected.len(), repo_name), ToastType::Success);
+                            s.mode = AppMode::Dashboard;
+                        }
+                    }
+                    _ => {
+                        s.mode = AppMode::Dashboard;
+                        s.show_toast("Download failed", ToastType::Error);
                     }
                 }
-                errors
-            }).await?;
-
-            let mut s = state.lock().await;
-            s.is_loading = false;
-
-            if !result.is_empty() {
-                s.mode = AppMode::Dashboard;
-                s.show_toast(format!("{} error(s) during download", result.len()), ToastType::Warning);
-            } else {
-                s.show_toast(format!("Downloaded {} file(s) to ~/swiftgit-repos/{}", selected.len(), repo_name), ToastType::Success);
-                s.mode = AppMode::Dashboard;
-            }
+            });
         }
         _ => {}
     }
@@ -1783,38 +1796,42 @@ async fn handle_repo_view(key: KeyEvent, state: Arc<Mutex<AppState>>) -> Result<
             let root = match root { Some(r) => r, None => { return Ok(false); } };
             let tok  = token.clone();
             let root_c = root.clone();
+            let state_c = Arc::clone(&state);
 
-            // Prefer SSH if key is available
-            let ssh_ready = crate::auth::test_ssh_github().is_ok();
-            let result = if ssh_ready {
-                tokio::task::spawn_blocking(move || crate::auth::pull_via_ssh(&root_c)).await?
-            } else {
-                tokio::task::spawn_blocking(move || {
-                    crate::git::GitRepo { root: root_c }.smart_pull(tok.as_deref())
-                }).await?
-            };
+            tokio::task::spawn(async move {
+                // Prefer SSH if key is available
+                let ssh_ready = crate::auth::test_ssh_github().is_ok();
+                let result = if ssh_ready {
+                    tokio::task::spawn_blocking(move || crate::auth::pull_via_ssh(&root_c)).await
+                } else {
+                    tokio::task::spawn_blocking(move || {
+                        crate::git::GitRepo { root: root_c }.smart_pull(tok.as_deref())
+                    }).await
+                };
 
-            let mut s = state.lock().await;
-            s.is_loading = false;
-            match result {
-                Ok(out) => {
-                    let first = out.lines().next().unwrap_or("Pulled").to_string();
-                    let msg = if first.contains("Already up to date")
-                              || first.contains("up-to-date") {
-                        "✅ Already up-to-date".to_string()
-                    } else {
-                        format!("✅ {}", first)
-                    };
-                    s.status_msg.clear(); // Task 2: toast only, don't block keybinds
-                    s.show_toast(msg, ToastType::Success);
-                    s.refresh_status();
+                let mut s = state_c.lock().await;
+                s.is_loading = false;
+                match result {
+                    Ok(Ok(out)) => {
+                        let first = out.lines().next().unwrap_or("Pulled").to_string();
+                        let msg = if first.contains("Already up to date")
+                                  || first.contains("up-to-date") {
+                            "✅ Already up-to-date".to_string()
+                        } else {
+                            format!("✅ {}", first)
+                        };
+                        s.status_msg.clear(); // Task 2: toast only, don't block keybinds
+                        s.show_toast(msg, ToastType::Success);
+                        drop(s);
+                        AppState::async_refresh_status(Arc::clone(&state_c)).await;
+                    }
+                    _ => {
+                        let msg = "❌ Pull failed".to_string();
+                        s.status_msg = msg.clone();
+                        s.show_toast(msg, ToastType::Error);
+                    }
                 }
-                Err(e) => {
-                    let msg = format!("❌ Pull failed: {}", e);
-                    s.status_msg = msg.clone();
-                    s.show_toast(msg, ToastType::Error);
-                }
-            }
+            });
         }
         KeyCode::Char('r') => {
             AppState::async_refresh_status(Arc::clone(&state)).await;
@@ -2218,54 +2235,60 @@ async fn handle_push_dialog(key: KeyEvent, state: Arc<Mutex<AppState>>) -> Resul
                 s.is_loading = true;
             }
 
+            let state_c    = Arc::clone(&state);
             let tok_c      = tok.clone();
             let root_c     = root.clone();
             let branch_c   = branch.clone();
             let username_c = username.clone();
             let repo_c     = repo_name.clone();
 
-            let result = tokio::task::spawn_blocking(move || {
-                // If SSH key ready, prioritize SSH push
-                if crate::auth::test_ssh_github().is_ok() {
-                    let _ = crate::auth::set_remote_ssh(&root_c, &username_c, &repo_c);
-                    crate::auth::push_via_ssh(&root_c, &branch_c, force_push)
-                } else {
-                    // Fallback to PAT via HTTPS
-                    crate::git::set_remote_and_push(&root_c, &tok_c, &username_c, &repo_c, &branch_c, force_push)
-                }
-            }).await?;
-
-            let mut s = state.lock().await;
-            s.is_loading = false;
-            match result {
-                Ok(out) => {
-                    let msg = if out.contains("Everything up-to-date") || out.contains("up to date") {
-                        format!("✅ Already up-to-date")
+            tokio::task::spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    // If SSH key ready, prioritize SSH push
+                    if crate::auth::test_ssh_github().is_ok() {
+                        let _ = crate::auth::set_remote_ssh(&root_c, &username_c, &repo_c);
+                        crate::auth::push_via_ssh(&root_c, &branch_c, force_push)
                     } else {
-                        format!("✅ Pushed to {}/{}!", username, repo_name)
-                    };
-                    s.push_dlg.status_msg = msg.clone();
-                    s.status_msg          = msg.clone();
-                    s.show_toast(msg, ToastType::Success);
-                    s.mode = AppMode::RepoView;
-                }
-                Err(e) => {
-                    let err_str = e.to_string();
-                    let is_rejected = err_str.contains("rejected") ||
-                                      err_str.contains("non-fast-forward") ||
-                                      err_str.contains("fetch first");
+                        // Fallback to PAT via HTTPS
+                        crate::git::set_remote_and_push(&root_c, &tok_c, &username_c, &repo_c, &branch_c, force_push)
+                    }
+                }).await;
 
-                    if is_rejected && !force_push {
-                        s.force_push_confirm_cursor = 0; // default to Cancel
-                        s.mode = AppMode::ForcePushConfirm;
-                        s.push_dlg.status_msg = "⚠ Push rejected — force push?".to_string();
-                    } else {
-                        let msg = format!("❌ Push failed: {}", e);
+                let mut s = state_c.lock().await;
+                s.is_loading = false;
+                match result {
+                    Ok(Ok(out)) => {
+                        let msg = if out.contains("Everything up-to-date") || out.contains("up to date") {
+                            format!("✅ Already up-to-date")
+                        } else {
+                            format!("✅ Pushed to {}/{}!", username, repo_name)
+                        };
                         s.push_dlg.status_msg = msg.clone();
-                        s.show_toast(msg, ToastType::Error);
+                        s.status_msg          = msg.clone();
+                        s.show_toast(msg, ToastType::Success);
+                        s.mode = AppMode::RepoView;
+                    }
+                    Ok(Err(e)) => {
+                        let err_str = e.to_string();
+                        let is_rejected = err_str.contains("rejected") ||
+                                          err_str.contains("non-fast-forward") ||
+                                          err_str.contains("fetch first");
+
+                        if is_rejected && !force_push {
+                            s.force_push_confirm_cursor = 0; // default to Cancel
+                            s.mode = AppMode::ForcePushConfirm;
+                            s.push_dlg.status_msg = "⚠ Push rejected — force push?".to_string();
+                        } else {
+                            let msg = format!("❌ Push failed: {}", e);
+                            s.push_dlg.status_msg = msg.clone();
+                            s.show_toast(msg, ToastType::Error);
+                        }
+                    }
+                    _ => {
+                        s.show_toast("Push failed", ToastType::Error);
                     }
                 }
-            }
+            });
         }
 
         _ => {}
