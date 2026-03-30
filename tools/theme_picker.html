@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SwiftGit Theme Picker</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#1a1b26;color:#c0caf5;font-family:'Fira Code','Cascadia Code',monospace;min-height:100vh;padding:24px 20px}
+
+h1{color:#7aa2f7;font-size:17px;font-weight:600;margin-bottom:4px}
+.subtitle{color:#565f89;font-size:12px;margin-bottom:24px}
+
+.layout{display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start}
+
+/* ── Left panel: color pickers ── */
+.panel{background:#16172a;border:1px solid #2a2c3e;border-radius:10px;padding:16px}
+.section-title{font-size:11px;color:#7aa2f7;letter-spacing:.08em;text-transform:uppercase;margin:14px 0 8px;padding-bottom:4px;border-bottom:1px solid #2a2c3e}
+.section-title:first-child{margin-top:0}
+.row{display:flex;align-items:center;gap:10px;padding:5px 0;border-radius:6px;cursor:pointer;transition:background .12s}
+.row:hover{background:#1e2030}
+.swatch{width:28px;height:28px;border-radius:6px;border:1px solid rgba(255,255,255,.12);cursor:pointer;flex-shrink:0}
+.label{flex:1;font-size:12px;color:#a9b1d6}
+.sublabel{font-size:10px;color:#565f89;display:block;margin-top:1px}
+.hex-in{background:#1e2030;border:1px solid #2a2c3e;border-radius:5px;color:#c0caf5;font-family:inherit;font-size:11px;padding:3px 6px;width:74px;text-align:center}
+.hex-in:focus{outline:none;border-color:#7aa2f7}
+
+/* ── Right panel: live preview ── */
+.preview-wrap{background:#16172a;border:1px solid #2a2c3e;border-radius:10px;overflow:hidden}
+.preview-bar{background:#12131f;padding:7px 14px;font-size:12px;color:#565f89;border-bottom:1px solid #2a2c3e}
+.preview-bar b{color:#7aa2f7}
+#preview{overflow-x:auto;font-size:12.5px;line-height:1.8;padding:0}
+#preview table{border-collapse:collapse;width:100%;min-width:500px}
+#preview tr:hover{filter:brightness(1.07)}
+.ln{width:34px;text-align:right;padding:0 7px;font-size:11px;user-select:none;border-right:1px solid #1e2030;vertical-align:top;padding-top:2px}
+.ln2{width:34px;text-align:right;padding:0 7px;font-size:11px;user-select:none;vertical-align:top;padding-top:2px}
+.sym{width:20px;text-align:center;font-weight:700;vertical-align:top;padding-top:1px}
+.code{padding:1px 10px 1px 4px;white-space:pre}
+
+/* ── Output box ── */
+.out-wrap{margin-top:20px;background:#16172a;border:1px solid #2a2c3e;border-radius:10px;padding:16px}
+.out-title{font-size:12px;color:#7aa2f7;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+#output{background:#0d0e17;border:1px solid #2a2c3e;border-radius:7px;padding:12px;font-size:11.5px;color:#9ece6a;white-space:pre;overflow-x:auto;line-height:1.7;max-height:320px;overflow-y:auto}
+.copy-btn{background:#1e2236;border:1px solid #2a2c3e;border-radius:6px;color:#7aa2f7;font-family:inherit;font-size:11px;padding:4px 12px;cursor:pointer;transition:background .15s}
+.copy-btn:hover{background:#2a2c3e}
+.copy-btn:active{transform:scale(.97)}
+.note{font-size:11px;color:#565f89;margin-top:10px;line-height:1.6}
+.note code{color:#e0af68}
+</style>
+</head>
+<body>
+
+<h1>SwiftGit — Diff Theme Picker</h1>
+<p class="subtitle">Pick colors visually → copy the generated Rust code → paste into <code style="color:#e0af68">src/ui/theme.rs</code> → <code style="color:#9ece6a">cargo build</code></p>
+
+<div class="layout">
+  <!-- Left: pickers -->
+  <div class="panel" id="picker-panel"></div>
+
+  <!-- Right: live preview -->
+  <div>
+    <div class="preview-wrap">
+      <div class="preview-bar"><b>Live preview</b> — updates as you pick</div>
+      <div id="preview"></div>
+    </div>
+    <div class="out-wrap">
+      <div class="out-title">
+        Generated <code style="color:#e0af68">theme.rs</code> snippet
+        <button class="copy-btn" onclick="copyOutput()">Copy</button>
+      </div>
+      <div id="output"></div>
+      <p class="note">
+        Replace everything after <code>pub const HIGHLIGHT_BG</code> in your <code>src/ui/theme.rs</code> with the snippet above, then run <code>cargo build</code>.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Color definitions ─────────────────────────────────────────────────────────
+const TOKENS = [
+  { group: 'Diff — line backgrounds' },
+  { key: 'DIFF_ADD_BG',    label: 'Added line bg',    sub: 'background behind + lines',   def: '#1a2e1a' },
+  { key: 'DIFF_DEL_BG',    label: 'Deleted line bg',  sub: 'background behind - lines',   def: '#2e1a1a' },
+  { key: 'DIFF_HUNK_BG',   label: 'Hunk header bg',   sub: 'background behind @@ lines',  def: '#1e2030' },
+
+  { group: 'Diff — line foregrounds' },
+  { key: 'DIFF_ADD_FG',    label: 'Added text',       sub: 'text color on + lines',       def: '#9ece6a' },
+  { key: 'DIFF_ADD_SYM',   label: '+ symbol',         sub: 'the + glyph in gutter',       def: '#73da5a' },
+  { key: 'DIFF_DEL_FG',    label: 'Deleted text',     sub: 'text color on - lines',       def: '#f7768e' },
+  { key: 'DIFF_DEL_SYM',   label: '- symbol',         sub: 'the - glyph in gutter',       def: '#f7768e' },
+  { key: 'DIFF_HUNK_FG',   label: 'Hunk header text', sub: '@@ -1,5 +1,8 @@ lines',      def: '#2ac3de' },
+  { key: 'DIFF_FILE_FG',   label: 'File header',      sub: 'diff --git / --- / +++ lines',def: '#bb9af7' },
+  { key: 'DIFF_CTX_FG',    label: 'Context lines',    sub: 'unchanged surrounding lines', def: '#a9b1d6' },
+  { key: 'DIFF_GUTTER_FG', label: 'Line numbers',     sub: 'old/new line number gutter',  def: '#3b4261' },
+  { key: 'DIFF_META_FG',   label: 'Meta text',        sub: '"no newline at end of file"', def: '#565f89' },
+
+  { group: 'Syntax — token colors' },
+  { key: 'SYN_KEYWORD',    label: 'Keywords',         sub: 'pub fn use let match if for', def: '#bb9af7' },
+  { key: 'SYN_TYPE',       label: 'Types',            sub: 'Result Option String PathBuf',def: '#2ac3de' },
+  { key: 'SYN_FUNCTION',   label: 'Functions',        sub: 'open() commit() render()',    def: '#7aa2f7' },
+  { key: 'SYN_STRING',     label: 'Strings',          sub: '"string literals"',           def: '#9ece6a' },
+  { key: 'SYN_COMMENT',    label: 'Comments',         sub: '// inline  //! doc comments', def: '#565f89' },
+  { key: 'SYN_NUMBER',     label: 'Numbers',          sub: '42  0o700  const identifiers',def: '#ff9e64' },
+  { key: 'SYN_MACRO',      label: 'Macros',           sub: 'bail!  matches!  println!',   def: '#e0af68' },
+  { key: 'SYN_ATTRIBUTE',  label: 'Attributes',       sub: '#[derive(Debug, Clone)]',     def: '#ff9e64' },
+  { key: 'SYN_OPERATOR',   label: 'Operators',        sub: '=> -> | & != == &&',          def: '#89ddff' },
+];
+
+// Current values
+const vals = {};
+TOKENS.filter(t => t.key).forEach(t => vals[t.key] = t.def);
+
+// ── Build picker panel ────────────────────────────────────────────────────────
+function buildPanel() {
+  const panel = document.getElementById('picker-panel');
+  panel.innerHTML = '';
+  TOKENS.forEach(t => {
+    if (t.group) {
+      const h = document.createElement('div');
+      h.className = 'section-title';
+      h.textContent = t.group;
+      panel.appendChild(h);
+      return;
+    }
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    const sw = document.createElement('input');
+    sw.type = 'color';
+    sw.className = 'swatch';
+    sw.value = t.def;
+    sw.title = t.key;
+    sw.addEventListener('input', e => { updateColor(t.key, e.target.value); hex.value = e.target.value; });
+
+    const lbl = document.createElement('div');
+    lbl.className = 'label';
+    lbl.innerHTML = `${t.label}<span class="sublabel">${t.sub}</span>`;
+
+    const hex = document.createElement('input');
+    hex.type = 'text';
+    hex.className = 'hex-in';
+    hex.value = t.def;
+    hex.maxLength = 7;
+    hex.addEventListener('input', e => {
+      const v = e.target.value;
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) { sw.value = v; updateColor(t.key, v); }
+    });
+    hex.addEventListener('blur', e => {
+      if (!/^#[0-9a-fA-F]{6}$/.test(e.target.value)) e.target.value = vals[t.key];
+    });
+
+    row.appendChild(sw); row.appendChild(lbl); row.appendChild(hex);
+    panel.appendChild(row);
+
+    // sync swatch bg for visual display
+    sw.style.backgroundColor = t.def;
+    sw.addEventListener('input', e => { sw.style.backgroundColor = e.target.value; });
+  });
+}
+
+function updateColor(key, hex) {
+  vals[key] = hex;
+  renderPreview();
+  renderOutput();
+}
+
+// ── Hex → rgb components ──────────────────────────────────────────────────────
+function hexToRgb(h) {
+  const r = parseInt(h.slice(1,3),16), g = parseInt(h.slice(3,5),16), b = parseInt(h.slice(5,7),16);
+  return [r,g,b];
+}
+function c(key) { return vals[key]; }
+
+// ── Live preview ──────────────────────────────────────────────────────────────
+const PREVIEW_LINES = [
+  { t:'file', text:'diff --git a/src/git/mod.rs b/src/git/mod.rs' },
+  { t:'hunk', old:5,  new:5,  text:'@@ -5,6 +5,9 @@ pub enum FileStatus {' },
+  { t:'ctx',  old:5,  new:5,  text:' pub enum FileStatus {' },
+  { t:'ctx',  old:6,  new:6,  text:'     Modified,' },
+  { t:'del',  old:7,  new:null,text:'-    Unknown,  // old fallback' },
+  { t:'add',  old:null,new:7, text:'+    Clean,     // committed, unchanged' },
+  { t:'add',  old:null,new:8, text:'+    Unknown,' },
+  { t:'ctx',  old:8,  new:9,  text:' }' },
+  { t:'hunk', old:22, new:23, text:'@@ -22,5 +23,7 @@ impl FileStatus {' },
+  { t:'ctx',  old:22, new:23, text:' impl FileStatus {' },
+  { t:'del',  old:23, new:null,text:'-    pub fn indicator(&self) -> &str {' },
+  { t:'add',  old:null,new:24,text:'+    pub fn indicator(&self) -> &\'static str {' },
+  { t:'ctx',  old:24, new:25, text:'         match self {' },
+  { t:'del',  old:25, new:null,text:'-            FileStatus::Staged => "[+]",' },
+  { t:'add',  old:null,new:26,text:'+            FileStatus::Staged | FileStatus::Added => "[✓]",' },
+  { t:'ctx',  old:26, new:27, text:'             FileStatus::Modified => "[M]",' },
+  { t:'ctx',  old:27, new:28, text:'             // deleted, renamed, untracked…' },
+  { t:'ctx',  old:28, new:29, text:'         }' },
+  { t:'ctx',  old:29, new:30, text:'     }' },
+  { t:'ctx',  old:30, new:31, text:' }' },
+];
+
+function syntaxColor(text) {
+  // Returns array of {text, color} segments
+  const kws = ['pub','fn','use','let','mut','const','struct','enum','impl','match','if','else','return','self','for','in','loop','while'];
+  const tys = ['Result','Option','String','Vec','PathBuf','Path','bool','u32','u64','usize','str'];
+
+  const segs = [];
+  // comment line
+  if (text.trimStart().startsWith('//')) { segs.push({text,color:c('SYN_COMMENT'),italic:true}); return segs; }
+  // attribute
+  if (text.trimStart().startsWith('#[')) { segs.push({text,color:c('SYN_ATTRIBUTE')}); return segs; }
+
+  // string split
+  const qi = text.indexOf('"');
+  if (qi !== -1) {
+    const qi2 = text.indexOf('"', qi+1);
+    const end = qi2 === -1 ? text.length : qi2+1;
+    if (qi > 0) segs.push(...syntaxColor(text.slice(0,qi)));
+    segs.push({text: text.slice(qi,end), color: c('SYN_STRING')});
+    if (end < text.length) segs.push(...syntaxColor(text.slice(end)));
+    return segs;
+  }
+
+  // tokenize
+  let cur = '';
+  const flush = () => {
+    if (!cur) return;
+    let col = c('DIFF_CTX_FG');
+    const bare = cur.replace(/[^a-zA-Z0-9_]/g,'');
+    if (kws.includes(bare)) col = c('SYN_KEYWORD');
+    else if (tys.includes(bare)) col = c('SYN_TYPE');
+    else if (cur.endsWith('!')) col = c('SYN_MACRO');
+    else if (cur.endsWith('(') || cur.endsWith('()')) col = c('SYN_FUNCTION');
+    else if (/^\d/.test(cur)) col = c('SYN_NUMBER');
+    segs.push({text:cur,color:col});
+    cur='';
+  };
+  for (const ch of text) {
+    if (/[a-zA-Z0-9_!]/.test(ch)) { cur+=ch; }
+    else {
+      flush();
+      const opCol = '=><|&!+-*/'.includes(ch) ? c('SYN_OPERATOR') : c('DIFF_CTX_FG');
+      segs.push({text:ch,color:opCol});
+    }
+  }
+  flush();
+  return segs;
+}
+
+function renderPreview() {
+  const tbl = document.createElement('table');
+  let prevOld = 0, prevNew = 0;
+
+  PREVIEW_LINES.forEach(ln => {
+    const tr = document.createElement('tr');
+    const body = ln.text.replace(/^[+\- ]/,'');
+
+    if (ln.t === 'file') {
+      tr.style.background = 'transparent';
+      const td = document.createElement('td');
+      td.colSpan = 4; td.style.padding = '1px 10px';
+      td.style.color = c('DIFF_FILE_FG'); td.style.fontWeight = '700';
+      td.textContent = ln.text; tr.appendChild(td);
+      tbl.appendChild(tr); return;
+    }
+
+    if (ln.t === 'hunk') {
+      tr.style.background = c('DIFF_HUNK_BG');
+      const td = document.createElement('td');
+      td.colSpan = 4; td.style.padding = '1px 10px';
+      td.style.color = c('DIFF_HUNK_FG'); td.style.fontWeight = '700';
+      td.textContent = ln.text; tr.appendChild(td);
+      tbl.appendChild(tr); return;
+    }
+
+    const isAdd = ln.t === 'add';
+    const isDel = ln.t === 'del';
+    if (isAdd) prevNew++;
+    else if (isDel) prevOld++;
+    else { prevOld++; prevNew++; }
+
+    const bg = isAdd ? c('DIFF_ADD_BG') : isDel ? c('DIFF_DEL_BG') : 'transparent';
+    tr.style.background = bg;
+
+    // old ln
+    const tdOld = document.createElement('td'); tdOld.className = 'ln';
+    tdOld.style.color = c('DIFF_GUTTER_FG');
+    tdOld.textContent = isDel ? prevOld : (!isAdd ? prevOld : '');
+    tr.appendChild(tdOld);
+
+    // new ln
+    const tdNew = document.createElement('td'); tdNew.className = 'ln2';
+    tdNew.style.color = c('DIFF_GUTTER_FG');
+    tdNew.textContent = isAdd ? prevNew : (!isDel ? prevNew : '');
+    tr.appendChild(tdNew);
+
+    // symbol
+    const tdSym = document.createElement('td'); tdSym.className = 'sym';
+    tdSym.style.color = isAdd ? c('DIFF_ADD_SYM') : isDel ? c('DIFF_DEL_SYM') : c('DIFF_GUTTER_FG');
+    tdSym.textContent = isAdd ? '+' : isDel ? '-' : ' ';
+    tr.appendChild(tdSym);
+
+    // code with syntax
+    const tdCode = document.createElement('td'); tdCode.className = 'code';
+    const baseFg = isAdd ? c('DIFF_ADD_FG') : isDel ? c('DIFF_DEL_FG') : c('DIFF_CTX_FG');
+    const segs = syntaxColor(body);
+    segs.forEach(seg => {
+      const sp = document.createElement('span');
+      sp.textContent = seg.text;
+      sp.style.color = seg.color;
+      if (seg.italic) sp.style.fontStyle = 'italic';
+      tdCode.appendChild(sp);
+    });
+    tr.appendChild(tdCode);
+    tbl.appendChild(tr);
+  });
+
+  const wrap = document.getElementById('preview');
+  wrap.innerHTML = '';
+  wrap.appendChild(tbl);
+}
+
+// ── Generate Rust output ──────────────────────────────────────────────────────
+function hexToRgbStr(h) {
+  const [r,g,b] = hexToRgb(h);
+  return `${r}, ${g}, ${b}`;
+}
+
+function renderOutput() {
+  const lines = [
+    `// ── Diff panel — line type backgrounds ───────────────────────────────────────`,
+    `pub const DIFF_ADD_BG:    Color = Color::Rgb(${hexToRgbStr(vals.DIFF_ADD_BG)});   // added line bg`,
+    `pub const DIFF_DEL_BG:    Color = Color::Rgb(${hexToRgbStr(vals.DIFF_DEL_BG)});   // deleted line bg`,
+    `pub const DIFF_HUNK_BG:   Color = Color::Rgb(${hexToRgbStr(vals.DIFF_HUNK_BG)});  // hunk header bg`,
+    ``,
+    `// ── Diff panel — line type foregrounds ───────────────────────────────────────`,
+    `pub const DIFF_ADD_FG:    Color = Color::Rgb(${hexToRgbStr(vals.DIFF_ADD_FG)});  // added line text`,
+    `pub const DIFF_ADD_SYM:   Color = Color::Rgb(${hexToRgbStr(vals.DIFF_ADD_SYM)});  // '+' glyph`,
+    `pub const DIFF_DEL_FG:    Color = Color::Rgb(${hexToRgbStr(vals.DIFF_DEL_FG)});  // deleted line text`,
+    `pub const DIFF_DEL_SYM:   Color = Color::Rgb(${hexToRgbStr(vals.DIFF_DEL_SYM)});  // '-' glyph`,
+    `pub const DIFF_HUNK_FG:   Color = Color::Rgb(${hexToRgbStr(vals.DIFF_HUNK_FG)});   // @@ hunk header`,
+    `pub const DIFF_FILE_FG:   Color = Color::Rgb(${hexToRgbStr(vals.DIFF_FILE_FG)});  // diff/--- /+++ header`,
+    `pub const DIFF_CTX_FG:    Color = Color::Rgb(${hexToRgbStr(vals.DIFF_CTX_FG)});  // context lines`,
+    `pub const DIFF_GUTTER_FG: Color = Color::Rgb(${hexToRgbStr(vals.DIFF_GUTTER_FG)});    // line number gutter`,
+    `pub const DIFF_META_FG:   Color = Color::Rgb(${hexToRgbStr(vals.DIFF_META_FG)});   // "no newline" etc`,
+    ``,
+    `// ── Diff panel — syntax token colors ─────────────────────────────────────────`,
+    `pub const SYN_KEYWORD:    Color = Color::Rgb(${hexToRgbStr(vals.SYN_KEYWORD)});  // pub fn use let match`,
+    `pub const SYN_TYPE:       Color = Color::Rgb(${hexToRgbStr(vals.SYN_TYPE)});   // Result Option String`,
+    `pub const SYN_FUNCTION:   Color = Color::Rgb(${hexToRgbStr(vals.SYN_FUNCTION)});  // open() commit()`,
+    `pub const SYN_STRING:     Color = Color::Rgb(${hexToRgbStr(vals.SYN_STRING)});  // "string literals"`,
+    `pub const SYN_COMMENT:    Color = Color::Rgb(${hexToRgbStr(vals.SYN_COMMENT)});   // // comments  //! docs`,
+    `pub const SYN_NUMBER:     Color = Color::Rgb(${hexToRgbStr(vals.SYN_NUMBER)});  // 42  0o700  consts`,
+    `pub const SYN_MACRO:      Color = Color::Rgb(${hexToRgbStr(vals.SYN_MACRO)});  // bail!  matches!`,
+    `pub const SYN_ATTRIBUTE:  Color = Color::Rgb(${hexToRgbStr(vals.SYN_ATTRIBUTE)});  // #[derive(…)]`,
+    `pub const SYN_OPERATOR:   Color = Color::Rgb(${hexToRgbStr(vals.SYN_OPERATOR)});  // => | & != ==`,
+  ];
+  document.getElementById('output').textContent = lines.join('\n');
+}
+
+function copyOutput() {
+  navigator.clipboard.writeText(document.getElementById('output').textContent)
+    .then(() => {
+      const btn = document.querySelector('.copy-btn');
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1500);
+    });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+buildPanel();
+renderPreview();
+renderOutput();
+</script>
+</body>
+</html>

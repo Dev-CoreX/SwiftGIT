@@ -1,0 +1,10 @@
+pub mod auth;
+pub mod dashboard;
+pub mod editor;
+pub mod ghgrab;
+pub mod push_dialog;
+pub mod repo_view;
+pub mod searching;
+pub mod settings_dialog;
+pub mod ssh_setup;
+pub mod toast;
