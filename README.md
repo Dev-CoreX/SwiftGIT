@@ -1,115 +1,60 @@
-# 🚀 SwiftGit v1.3.7
+# SwiftGit v1.4
 
->**A minimal, fast, keyboard-driven Git client for your terminal.**
+> A keyboard-driven, terminal-based Git client built in Rust. Faster than typing, cleaner than a GUI.
 
-SwiftGit is a high-performance terminal user interface (TUI) that streamlines your everyday Git workflows into a clean, intuitive experience. Built with **Rust** and **Ratatui**, it focuses on speed, simplicity, and a "no-nonsense" approach to version control.
+SwiftGit is a high-performance TUI (Terminal User Interface) application for managing Git repositories. It integrates directly with GitHub, features a syntax-highlighted diff viewer, an inline editor, and a powerful "GhGrab" tool for selective file downloads.
 
----
+## 🚀 Key Features in v1.4
 
-## ✨ New in v1.3
+- **Hunk-based Staging** — Precision staging is here! Navigate between individual diff hunks (`Tab`/`n`/`p`) and stage/unstage them independently (`Space`). Active hunks are highlighted for clarity.
+- **Dashboard** — Quick access to Open, Clone, and Recent Projects.
+- **Recent Projects Dialog** — Pressing "Recent Projects" now opens a selection modal to pick from your history. Support for removing individual entries (`d`) or clearing all (`C`).
+- **Collapsible File Tree** — Navigate complex repos with ease; status indicators (`[M]`, `[U]`, `[✓]`) show what's happening at a glance.
+- **Syntax-Highlighted Diff** — TokyoNight Storm theme with token-level highlighting.
+- **Async Diff Loading** — No more UI stutter; diffs load in the background with a smooth spinner.
+- **Permanent Commit History** — The left panel now permanently displays recent commits for the current repo.
+- **Stage/Unstage** — Spacebar to toggle files, entire folders, or individual hunks.
+- **Smart Push/Pull** — Seamlessly handles SSH and HTTPS/PAT authentication. Detects remote changes and offers force-push confirmation if needed.
+- **Inline Editor** — Press `e` to edit any file directly within SwiftGit.
+- **SSH Setup Wizard** — Step-by-step guidance to generate and register SSH keys on GitHub.
+- **GhGrab** — Selective file/folder download from any GitHub repository without cloning.
+- **Enhanced Installer** — `install.sh` now features an orange-boxed interactive configuration wizard to set up your GitHub PAT, username, and SSH keys during installation.
 
-- **🔐 Smart Authentication**: SwiftGit now automatically detects your SSH keys. It prioritizes **SSH** for lightning-fast, prompt-less pushes/pulls and intelligently falls back to **PAT (HTTPS)** only when needed.
-- **🔥 Force Push Support**: Stuck with a non-fast-forward rejection? You can now toggle **Force Push** by pressing `Ctrl+F` inside the push dialog. A clear visual indicator will let you know when it's active.
-- **📜 Commit History at a Glance**: When you're drafting a new commit, SwiftGit shows you the **last 5 commits** along with their hashes right below the input box, so you never lose track of your progress.
-- **⏳ Global Loading Spinner**: No more wondering if a process is hung. A sleek loading box appears in the bottom-right corner with **real-time status labels** (e.g., "Cloning entire repo...", "Pushing via SSH...") during long-running tasks.
-- **📁 Enhanced Tree Navigation**: Folders now show status indicators (like `[✓]` for all staged) just like files.
-- **📝 Built-in Editor**: Quick fix needed? Press `e` on any file to open the internal editor and make changes without leaving SwiftGit.
-- **🌐 GhGrab (GitHub Explorer)**: Browse and download specific files or folders from any GitHub repository directly from the dashboard—perfect for grabbing just what you need without a full clone.
+## 🛠 Installation
 
----
-
-## 🛠️ Key Features
-
-- **⚡ Instant Dashboard**: Quick access to open folders, clone repositories, or jump back into one of your last 10 projects.
-- **📂 Smart Path Suggestions**: Navigate your local filesystem with live directory suggestions and `Tab` completion.
-- **🏗️ Powerful Repository View**:
-  - **Live Status**: Instantly see `[M]` Modified, `[U]` Untracked, and `[✓]` Staged files.
-  - **Stage/Unstage**: Toggle file status with a single `Space` or stage everything at once with `s`.
-  - **Diff Preview**: Syntax-highlighted diffs in a dedicated, high-contrast panel.
-- **⚙️ Integrated Settings**: Press `Ctrl+W` anywhere to manage your GitHub token and profile. Credentials are automatically masked for your security.
-- **🌈 Universal Emoji Icons**: Works on every terminal and OS without needing special "Nerd Fonts"—just clean, beautiful icons out of the box.
-
----
-
-## 🚀 Installation (Automated)
-
-The included installer checks for system dependencies and handles the build process for you on **Debian/Ubuntu** or **Arch Linux**.
+Requirements: Rust 1.74+, Git, and SSH.
 
 ```bash
-git clone https://github.com/Dev-CoreX/SwiftGIT.git
-cd SwiftGIT
+# Automated install (Wizard included)
 ./install.sh
-```
 
-## 🏗️ Installation (Manual)
-
-If you prefer to build manually, ensure you have **Rust** and **Git** installed:
-
-```bash
+# Manual build
 cargo build --release
-sudo cp target/release/swiftgit /usr/local/bin/
+cp target/release/swiftgit /usr/local/bin/
 ```
 
----
+## ⌨️ Keybindings
 
-## ⌨️ Keyboard Shortcuts
-
-### Global
 | Key | Action |
 |-----|--------|
-| `Ctrl+W` | Open / Close Settings |
-| `Ctrl+C` | Force Quit |
-| `Ctrl+Q` | Quit App |
-
-### Dashboard
-| Key | Action |
-|-----|--------|
-| `↑↓` / `j/k` | Navigate Menu |
-| `Enter` | Select / Open Project |
-| `1` / `2` | Quick access: Open Folder / Clone Repo |
-| `g` | Open GhGrab (GitHub Explorer) |
-
-### Repository View
-| Key | Action |
-|-----|--------|
-| `↑↓` / `j/k` | Navigate File Tree |
-| `Enter` | Expand/Collapse Folder |
-| `Space` | Stage / Unstage File |
-| `s` | Stage ALL changes (`git add -A`) |
-| `e` | Open Built-in Editor |
-| `c` | Commit Mode (shows history) |
-| `p` | Open Push Dialog |
-| `P` | Smart Pull (auto-detects SSH/PAT) |
-| `r` | Refresh Status |
-| `Esc` | Back to Dashboard |
-
-### Push Dialog
-| Key | Action |
-|-----|--------|
-| `Ctrl+F` | **Toggle Force Push** |
-| `Tab` / `↑↓` | Switch Fields (Repo Name / Branch) |
-| `Enter` | Confirm Push |
-| `Esc` | Cancel |
-
----
+| `↑` / `↓` | Navigate tree / lists |
+| `Tab` / `n` | Next diff hunk |
+| `BackTab` / `p` | Previous diff hunk |
+| `Space` | Stage / Unstage file, folder, or hunk |
+| `Enter` | Expand/Collapse folder / Open selection |
+| `s` | Stage all changes |
+| `c` | Enter commit message mode |
+| `p` | Open Push dialog (if no hunk selected) |
+| `P` | Pull from remote |
+| `e` | Edit current file inline |
+| `r` | Refresh status |
+| `Ctrl+W` | Open Settings (Token, Username, Display Name) |
+| `1` / `2` | Switch focus between Tree and Diff panel |
+| `q` / `Esc`| Back / Quit |
 
 ## ⚙️ Configuration
 
-SwiftGit keeps things simple in `~/.swiftgit/config.json`.
-
-```json
-{
-  "github_token": "ghp_your_token_here",
-  "username": "your_github_username",
-  "display_name": "Your Name",
-  "recent_projects": []
-}
-```
+SwiftGit stores its configuration in `~/.swiftgit/config.json`. The `install.sh` wizard handles this automatically, but you can edit it manually or via the `Ctrl+W` settings overlay.
 
 ---
-
-## 📄 License
-
-**MIT License** - Free to use, modify, and share.
-
-Built with ❤️ by the SwiftGit team for developers who live in the terminal.
+Built with 🦀 by SwiftGit Team.

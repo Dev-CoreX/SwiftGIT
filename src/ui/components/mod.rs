@@ -1,7 +1,8 @@
 pub mod auth;
 pub mod dashboard;
 pub mod editor;
-pub mod ghgrab;
+pub mod help_dialog;
+pub mod remote_picker;
 pub mod push_dialog;
 pub mod repo_view;
 pub mod searching;

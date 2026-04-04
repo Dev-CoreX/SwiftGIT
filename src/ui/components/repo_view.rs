@@ -9,9 +9,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::git::FileStatus;
 use crate::ui::theme::*;
-use crate::ui::{DisplayItem, spinner_char};
+use crate::ui::{spinner_char, DisplayItem};
 
 pub struct RepoViewState<'a> {
     pub repo_name:     &'a str,
@@ -20,7 +19,10 @@ pub struct RepoViewState<'a> {
     pub display_items: &'a [DisplayItem],
     pub cursor:        usize,
     pub scroll_offset: usize,
+    pub diff_scroll:   usize,
     pub diff_content:  &'a str,
+    pub diff_struct:   &'a crate::git::Diff,
+    pub hunk_cursor:   Option<usize>,
     pub commit_mode:   bool,
     pub commit_input:  &'a str,
     pub commit_cursor: usize,
@@ -34,138 +36,91 @@ pub struct RepoViewState<'a> {
 
 // ── File-type icons ───────────────────────────────────────────────────────────
 
-fn file_icon(name: &str) -> &'static str {
-    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
-    match ext.as_str() {
-        "rs"                              => "🦀",
-        "js" | "mjs" | "cjs"             => "JS",
-        "ts" | "tsx"                      => "TS",
-        "jsx"                             => "⚛ ",
-        "html" | "htm"                    => "🌐",
-        "css" | "scss" | "sass"           => "🎨",
-        "json"                            => "{}",
-        "toml" | "ini" | "cfg"            => "⚙ ",
-        "yaml" | "yml"                    => "📋",
-        "env"                             => "🔑",
-        "md" | "mdx"                      => "📝",
-        "txt"                             => "📃",
-        "sh" | "bash" | "zsh" | "fish"   => "⚡",
-        "py"                              => "🐍",
-        "rb"                              => "💎",
-        "go"                              => "🐹",
-        "java" | "kt"                     => "☕",
-        "c" | "h"                         => "C ",
-        "cpp" | "cc" | "cxx" | "hpp"     => "C+",
-        "cs"                              => "C#",
-        "php"                             => "🐘",
-        "swift"                           => "🍎",
-        "lock"                            => "🔒",
-        "log"                             => "📜",
-        "png"|"jpg"|"jpeg"|"gif"|"svg"
-        |"webp"|"ico"                     => "🖼 ",
-        "zip"|"tar"|"gz"|"bz2"           => "📦",
-        "sql"|"db"|"sqlite"              => "🗃 ",
-        "xml"                             => "📄",
-        "pdf"                             => "📕",
-        _                                 => "  ",
-    }
+fn file_icon(path: &str) -> &'static str {
+    let p = path.to_lowercase();
+    if p.ends_with(".rs") { "🦀" }
+    else if p.ends_with(".py") { "🐍" }
+    else if p.ends_with(".js") || p.ends_with(".ts") { "JS" }
+    else if p.ends_with(".json") { "JSON" }
+    else if p.ends_with(".md") { "📝" }
+    else if p.ends_with(".toml") { "⚙️" }
+    else if p.ends_with(".sh") || p.ends_with(".bash") { "🐚" }
+    else if p.ends_with(".zip") || p.ends_with(".tar") || p.ends_with(".gz") { "📦" }
+    else if p.ends_with(".png") || p.ends_with(".jpg") || p.ends_with(".svg") { "🖼️" }
+    else { "📄" }
 }
 
-// ── Task 1: compute folder status for green tick ──────────────────────────────
-
-enum FolderStatus { AllClean, AllStaged, Mixed, HasChanges }
-
-fn folder_status(folder_path: &str, files: &[crate::git::GitFile]) -> FolderStatus {
-    use crate::git::FileStatus;
-    let children: Vec<_> = files.iter()
-        .filter(|f| f.path.starts_with(&format!("{}/", folder_path)))
-        .collect();
-    if children.is_empty() { return FolderStatus::AllClean; }
-
-    let all_clean   = children.iter().all(|f| matches!(f.status, FileStatus::Clean | FileStatus::Unknown));
-    let all_staged  = children.iter().all(|f| f.status.is_staged());
-    let any_staged  = children.iter().any(|f| f.status.is_staged());
-
-
-    if all_clean   { FolderStatus::AllClean }
-    else if all_staged { FolderStatus::AllStaged }
-    else if any_staged { FolderStatus::Mixed }
-    else               { FolderStatus::HasChanges }
-}
-
-// ── Main render ───────────────────────────────────────────────────────────────
+// ── Main Render ───────────────────────────────────────────────────────────────
 
 pub fn render(f: &mut Frame, area: Rect, s: &RepoViewState) {
-    let main = Layout::default()
+    let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(8),
-            Constraint::Length(2),
+            Constraint::Length(3), // Header
+            Constraint::Min(10),   // Main body
+            Constraint::Length(1), // Footer
         ])
         .split(area);
 
-    render_header(f, main[0], s);
-
-    let cols = Layout::default()
+    render_header(f, chunks[0], s);
+    
+    let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-        .split(main[1]);
+        .constraints([
+            Constraint::Percentage(30), // Tree + History
+            Constraint::Percentage(70), // Diff
+        ])
+        .split(chunks[1]);
 
-    render_tree(f, cols[0], s);
-    render_diff(f, cols[1], s);
-    render_footer(f, main[2], s, false);
+    render_tree(f, body[0], s);
+    render_diff(f, body[1], s);
+    render_footer(f, chunks[2], s);
 }
 
-pub fn render_with_editor(
-    f: &mut Frame,
-    area: Rect,
-    s: &RepoViewState,
-    editor: &super::editor::EditorState,
-) {
-    let main = Layout::default()
+pub fn render_with_editor(f: &mut Frame, area: Rect, s: &RepoViewState, ed: &crate::ui::components::editor::EditorState) {
+    let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Min(8),
-            Constraint::Length(2),
+            Constraint::Min(10),
+            Constraint::Length(1),
         ])
         .split(area);
 
-    render_header(f, main[0], s);
-
-    let cols = Layout::default()
+    render_header(f, chunks[0], s);
+    
+    let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-        .split(main[1]);
+        .constraints([
+            Constraint::Percentage(30),
+            Constraint::Percentage(70),
+        ])
+        .split(chunks[1]);
 
-    let tree_s = RepoViewState { active_frame: 1, ..*s };
-    render_tree(f, cols[0], &tree_s);
-    super::editor::render(f, cols[1], editor);
-    render_footer(f, main[2], s, true);
+    render_tree(f, body[0], s);
+    crate::ui::components::editor::render(f, body[1], ed);
+    render_footer(f, chunks[2], s);
 }
 
-// ── Header bar ────────────────────────────────────────────────────────────────
+// ── Header ────────────────────────────────────────────────────────────────────
 
 fn render_header(f: &mut Frame, area: Rect, s: &RepoViewState) {
-    let spin = if s.is_loading {
-        format!(" {} ", spinner_char(s.frame_count))
-    } else {
-        "  ".to_string()
-    };
-    let text = format!("{}  {}  [{}]", spin, s.repo_name, s.branch);
-    f.render_widget(
-        Paragraph::new(text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" SwiftGit v1.3 ")
-                    .border_style(Style::default().fg(ACCENT_COLOR))
-                    .style(Style::default().bg(BG_COLOR)),
-            )
-            .style(Style::default().fg(FG_COLOR).add_modifier(Modifier::BOLD)),
-        area,
-    );
+    let title = format!(" SwiftGit v1.4 │ {} ", s.repo_name);
+    let branch = format!(" 🌿 {} ", s.branch);
+    
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(BORDER_COLOR))
+        .style(Style::default().bg(BG_COLOR));
+
+    let header_text = vec![
+        Line::from(vec![
+            Span::styled(title, Style::default().fg(ACCENT_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(branch, Style::default().fg(SUCCESS_COLOR)),
+        ])
+    ];
+
+    f.render_widget(Paragraph::new(header_text).block(block), area);
 }
 
 // ── Tree panel ────────────────────────────────────────────────────────────────
@@ -219,22 +174,12 @@ fn render_tree(f: &mut Frame, area: Rect, s: &RepoViewState) {
 
     let active_dot = if s.active_frame == 1 { "◉" } else { "○" };
     let border_col = if s.active_frame == 1 { ACCENT_COLOR } else { BORDER_COLOR };
-    let file_count = s.display_items.iter()
-        .filter(|d| matches!(d, DisplayItem::FileEntry { .. }))
-        .count();
-    let title = if s.is_loading {
-        format!(" {} 1  {} Working Tree ", active_dot, spinner_char(s.frame_count))
-    } else if s.display_items.is_empty() {
-        format!(" {} 1  Working Tree (clean ✓) ", active_dot)
-    } else {
-        format!(" {} 1  Working Tree ({}) ", active_dot, file_count)
-    };
 
     f.render_widget(
         List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(title)
+                .title(format!(" {} 1  Working Tree ", active_dot))
                 .border_style(Style::default().fg(border_col))
                 .style(Style::default().bg(BG_COLOR)),
         ),
@@ -273,78 +218,56 @@ fn build_item(item: &DisplayItem, selected: bool, s: &RepoViewState) -> ListItem
         DisplayItem::FolderHeader { path, count, expanded, depth } => {
             let arrow  = if *expanded { "▼ " } else { "▶ " };
             let indent = "  ".repeat(*depth);
-            let name   = path.split('/').next_back().unwrap_or(path.as_str());
-
-            // Task 1: show status indicator for folders same as files
-            let (indicator, ind_color) = match folder_status(path, s.files) {
-                FolderStatus::AllClean   => ("[ ]", BORDER_COLOR),   // all committed & clean
-                FolderStatus::AllStaged  => ("[✓]", SUCCESS_COLOR),  // all staged
-                FolderStatus::Mixed      => ("[~]", WARNING_COLOR),   // some staged
-                FolderStatus::HasChanges => ("[M]", WARNING_COLOR),   // has changes not staged
+            let name   = path.split('/').last().unwrap_or(path);
+            let style  = if selected { Style::default().fg(BG_COLOR).bg(FOLDER_COLOR) } 
+                         else { Style::default().fg(FOLDER_COLOR) };
+            
+            ListItem::new(Line::from(vec![
+                Span::raw(indent),
+                Span::styled(arrow, style),
+                Span::styled(format!("{}/", name), style.add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" ({})", count), Style::default().fg(BORDER_COLOR)),
+            ]))
+        }
+        DisplayItem::FileEntry { file_idx, depth } => {
+            let indent = "  ".repeat(*depth + 1);
+            let file = match s.files.get(*file_idx) {
+                Some(f) => f,
+                None => {
+                    // Fallback for ghost entries during rapid refreshes
+                    return ListItem::new(" (updating...)");
+                }
+            };
+            let name = file.path.split('/').last().unwrap_or(&file.path);
+            let icon = file_icon(name);
+            let status = &file.status;
+            
+            let (status_color, indicator) = match status {
+                crate::git::FileStatus::Staged | crate::git::FileStatus::Added => (SUCCESS_COLOR, status.indicator()),
+                crate::git::FileStatus::Modified => (WARNING_COLOR, status.indicator()),
+                crate::git::FileStatus::Untracked => (ACCENT_COLOR, status.indicator()),
+                crate::git::FileStatus::Deleted => (ERROR_COLOR, status.indicator()),
+                crate::git::FileStatus::Clean => (BORDER_COLOR, status.indicator()),
+                _ => (FG_COLOR, "[ ]"),
             };
 
-            let label = format!(" {}{}{} 📁 {}/  ({})", indent, arrow, indicator, name, count);
+            let mut spans = vec![
+                Span::raw(indent),
+                Span::styled(format!("{} ", indicator), Style::default().fg(status_color)),
+                Span::raw(format!("{} ", icon)),
+            ];
 
             if selected {
-                ListItem::new(Line::from(Span::styled(
-                    label,
-                    Style::default().fg(BG_COLOR).bg(ACCENT_COLOR).add_modifier(Modifier::BOLD),
-                )))
+                spans.push(Span::styled(name.to_string(), Style::default().fg(BG_COLOR).bg(FG_COLOR).add_modifier(Modifier::BOLD)));
             } else {
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!(" {}{}", indent, arrow),
-                        Style::default().fg(BORDER_COLOR),
-                    ),
-                    Span::styled(
-                        format!("{} ", indicator),
-                        Style::default().fg(ind_color).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!("📁 {}/  ({})", name, count),
-                        Style::default().fg(FOLDER_COLOR).add_modifier(Modifier::BOLD),
-                    ),
-                ]))
-            }
-        }
-
-        DisplayItem::FileEntry { file_idx, depth } => {
-            if let Some(file) = s.files.get(*file_idx) {
-                let indicator = file.status.indicator();
-                let ind_color = match &file.status {
-                    FileStatus::Staged | FileStatus::Added => SUCCESS_COLOR,
-                    FileStatus::Modified                    => WARNING_COLOR,
-                    FileStatus::Untracked                   => BORDER_COLOR,
-                    FileStatus::Deleted                     => ERROR_COLOR,
-                    FileStatus::Clean                       => BORDER_COLOR, // dim — clean file
-                    FileStatus::Unknown                     => BORDER_COLOR,
-                    _                                       => FG_COLOR,
-                };
-                let indent = "  ".repeat(*depth);
-                let fname  = file.path.split('/').next_back().unwrap_or(&file.path);
-                let icon   = file_icon(fname);
-
-                if selected {
-                    ListItem::new(Line::from(Span::styled(
-                        format!(" {} {} {} {}", indent, icon, indicator, fname),
-                        Style::default().fg(BG_COLOR).bg(ACCENT_COLOR).add_modifier(Modifier::BOLD),
-                    )))
-                } else {
-                    ListItem::new(Line::from(vec![
-                        Span::styled(
-                            format!(" {} {} ", indent, icon),
-                            Style::default().fg(BORDER_COLOR),
-                        ),
-                        Span::styled(
-                            format!("{} ", indicator),
-                            Style::default().fg(ind_color).add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(fname.to_string(), Style::default().fg(FG_COLOR)),
-                    ]))
+                let mut style = Style::default().fg(FG_COLOR);
+                if matches!(status, crate::git::FileStatus::Clean) {
+                    style = style.add_modifier(Modifier::DIM);
                 }
-            } else {
-                ListItem::new("")
+                spans.push(Span::styled(name.to_string(), style));
             }
+
+            ListItem::new(Line::from(spans))
         }
     }
 }
@@ -352,10 +275,12 @@ fn build_item(item: &DisplayItem, selected: bool, s: &RepoViewState) -> ListItem
 // ── Task 4: Diff panel with minimal readable theme ───────────────────────────
 
 fn render_diff(f: &mut Frame, area: Rect, s: &RepoViewState) {
-    // Task 4: split diff into header (file/hunk info) + body (code lines)
-    let _inner = Layout::default()
+    let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1)])
+        .constraints([
+            Constraint::Min(1),    // body
+            Constraint::Length(1), // hunk keybinds
+        ])
         .split(area);
 
     let diff_lines: Vec<Line> = if s.is_diff_loading {
@@ -368,7 +293,7 @@ fn render_diff(f: &mut Frame, area: Rect, s: &RepoViewState) {
             format!("  {} loading…", spinner_char(s.frame_count)),
             Style::default().fg(BORDER_COLOR),
         ))]
-    } else if s.diff_content.is_empty() || s.diff_content == "(no changes)" {
+    } else if s.diff_struct.is_empty() {
         vec![
             Line::from(""),
             Line::from(Span::styled(
@@ -377,7 +302,7 @@ fn render_diff(f: &mut Frame, area: Rect, s: &RepoViewState) {
             )),
         ]
     } else {
-        render_diff_lines(s.diff_content)
+        render_diff_struct(s.diff_struct, s.hunk_cursor)
     };
 
     let active_dot = if s.active_frame == 2 { "◉" } else { "○" };
@@ -402,273 +327,64 @@ fn render_diff(f: &mut Frame, area: Rect, s: &RepoViewState) {
                     .border_style(Style::default().fg(border_col))
                     .style(Style::default().bg(BG_COLOR)),
             )
+            .scroll((s.diff_scroll as u16, 0))
             .wrap(ratatui::widgets::Wrap { trim: false }),
-        area,
+        chunks[0],
     );
+
+    if let Some(hc) = s.hunk_cursor {
+        let hunk_msg = format!(" Hunk {}/{}  Space: Stage/Unstage Hunk  Tab: Next Hunk  n/p: Nav ", 
+            hc + 1, s.diff_struct.hunks.len());
+        f.render_widget(
+            Paragraph::new(hunk_msg).style(Style::default().fg(ACCENT_COLOR)),
+            chunks[1]
+        );
+    }
 }
 
-/// Diff theme renderer — all colors sourced from src/ui/theme.rs.
-/// To change any color: edit the corresponding SYN_* or DIFF_* constant in theme.rs, rebuild.
-fn render_diff_lines(content: &str) -> Vec<Line<'static>> {
-
-    // Short aliases pointing to theme.rs public constants
-    let add_bg    = DIFF_ADD_BG;
-    let add_fg    = DIFF_ADD_FG;
-    let add_sym   = DIFF_ADD_SYM;
-    let del_bg    = DIFF_DEL_BG;
-    let del_fg    = DIFF_DEL_FG;
-    let del_sym   = DIFF_DEL_SYM;
-    let hunk_fg   = DIFF_HUNK_FG;
-    let hunk_bg   = DIFF_HUNK_BG;
-    let file_fg   = DIFF_FILE_FG;
-    let ctx_fg    = DIFF_CTX_FG;
-    let gutter_fg = DIFF_GUTTER_FG;
-    let meta_fg   = DIFF_META_FG;
-    let kw_fg     = SYN_KEYWORD;
-    let ty_fg     = SYN_TYPE;
-    let fn_fg     = SYN_FUNCTION;
-    let st_fg     = SYN_STRING;
-    let cm_fg     = SYN_COMMENT;
-    let nu_fg     = SYN_NUMBER;
-    let mc_fg     = SYN_MACRO;
-    let at_fg     = SYN_ATTRIBUTE;
-    let op_fg     = SYN_OPERATOR;
-
-    // Rust keyword list
-    let keywords: &[&str] = &[
-        "pub", "fn", "use", "let", "mut", "const", "static", "struct", "enum",
-        "impl", "trait", "type", "where", "for", "in", "if", "else", "match",
-        "return", "self", "Self", "super", "crate", "mod", "ref", "async",
-        "await", "loop", "while", "break", "continue", "true", "false",
-        "unsafe", "extern", "dyn", "move", "box",
-    ];
-    let builtin_types: &[&str] = &[
-        "Option", "Result", "String", "Vec", "HashMap", "HashSet",
-        "PathBuf", "Path", "Box", "Arc", "Rc", "Mutex", "bool",
-        "u8","u16","u32","u64","u128","usize",
-        "i8","i16","i32","i64","i128","isize",
-        "f32","f64","str","char",
-    ];
-
-    // Colors bundled for passing into inner fns (avoids closure capture issues)
-    #[allow(clippy::too_many_arguments)]
-    fn classify_token(
-        token: &str, kws: &[&str], tys: &[&str],
-        kw: ratatui::style::Color, ty: ratatui::style::Color,
-        fn_c: ratatui::style::Color, st: ratatui::style::Color,
-        cm: ratatui::style::Color, nu: ratatui::style::Color,
-        mc: ratatui::style::Color, at: ratatui::style::Color,
-        op: ratatui::style::Color, ctx: ratatui::style::Color,
-    ) -> ratatui::style::Color {
-        if token.starts_with("//") { return cm; }
-        if token.starts_with('"') || token.ends_with('"') { return st; }
-        if token.starts_with('#') { return at; }
-        if token.ends_with('!') { return mc; }
-        let bare = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
-        if kws.contains(&bare) { return kw; }
-        if tys.contains(&bare) { return ty; }
-        if token.ends_with("()") || token.ends_with('(') { return fn_c; }
-        if token.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) { return nu; }
-        if ["=>", "->", "!=", "==", "&&", "||", "|", "&"].contains(&token) { return op; }
-        let _ = (fn_c, nu); // suppress unused warnings
-        ctx
+fn render_diff_struct<'a>(diff: &'a crate::git::Diff, hunk_cursor: Option<usize>) -> Vec<Line<'a>> {
+    let mut lines = Vec::new();
+    
+    // Header lines
+    for line in diff.file_header.lines() {
+        let s: String = line.to_string();
+        lines.push(Line::from(Span::styled(s, Style::default().fg(DIFF_FILE_FG))));
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn build_spans(
-        code: &str,
-        base_fg: ratatui::style::Color,
-        base_bg: Option<ratatui::style::Color>,
-        kws: &[&str], tys: &[&str],
-        kw: ratatui::style::Color, ty: ratatui::style::Color,
-        fn_c: ratatui::style::Color, st: ratatui::style::Color,
-        cm: ratatui::style::Color, nu: ratatui::style::Color,
-        mc: ratatui::style::Color, at: ratatui::style::Color,
-        op: ratatui::style::Color, ctx: ratatui::style::Color,
-    ) -> Vec<Span<'static>> {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        let apply_bg = |s: Style| if let Some(bg) = base_bg { s.bg(bg) } else { s };
-
-        let trimmed = code.trim_start();
-        if trimmed.starts_with("//") {
-            spans.push(Span::styled(code.to_string(),
-                apply_bg(Style::default().fg(cm).add_modifier(Modifier::ITALIC))));
-            return spans;
-        }
-        if trimmed.starts_with("#[") || trimmed.starts_with("#!") {
-            spans.push(Span::styled(code.to_string(), apply_bg(Style::default().fg(at))));
-            return spans;
-        }
-        if let Some(sq) = code.find('"') {
-            if sq > 0 {
-                spans.extend(build_spans(&code[..sq], base_fg, base_bg,
-                    kws, tys, kw, ty, fn_c, st, cm, nu, mc, at, op, ctx));
-            }
-            let rest = &code[sq+1..];
-            let end = rest.find('"').map(|e| sq + 1 + e + 1).unwrap_or(code.len());
-            spans.push(Span::styled(code[sq..end].to_string(), apply_bg(Style::default().fg(st))));
-            if end < code.len() {
-                spans.extend(build_spans(&code[end..], base_fg, base_bg,
-                    kws, tys, kw, ty, fn_c, st, cm, nu, mc, at, op, ctx));
-            }
-            return spans;
-        }
-        let mut current = String::new();
-        for ch in code.chars() {
-            if ch.is_alphanumeric() || ch == '_' || ch == '!' {
-                current.push(ch);
-            } else {
-                if !current.is_empty() {
-                    let col = classify_token(&current, kws, tys,
-                        kw, ty, fn_c, st, cm, nu, mc, at, op, ctx);
-                    spans.push(Span::styled(current.clone(), apply_bg(Style::default().fg(col))));
-                    current.clear();
-                }
-                let op_col = match ch {
-                    '=' | '>' | '<' | '|' | '&' | '!' | '+' | '-' | '*' | '/' => op,
-                    _ => base_fg,
-                };
-                spans.push(Span::styled(ch.to_string(), apply_bg(Style::default().fg(op_col))));
-            }
-        }
-        if !current.is_empty() {
-            let col = classify_token(&current, kws, tys,
-                kw, ty, fn_c, st, cm, nu, mc, at, op, ctx);
-            spans.push(Span::styled(current, apply_bg(Style::default().fg(col))));
-        }
-        spans
-    }
-
-    // Convenience macro to call build_spans with all color args
-    macro_rules! syn {
-        ($code:expr, $fg:expr, $bg:expr) => {
-            build_spans($code, $fg, $bg, keywords, builtin_types,
-                kw_fg, ty_fg, fn_fg, st_fg, cm_fg, nu_fg, mc_fg, at_fg, op_fg, ctx_fg)
+    for (i, hunk) in diff.hunks.iter().enumerate() {
+        let is_active = hunk_cursor == Some(i);
+        let header_style = if is_active {
+            Style::default().fg(BG_COLOR).bg(DIFF_HUNK_FG).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(DIFF_HUNK_FG).bg(DIFF_HUNK_BG)
         };
+        
+        lines.push(Line::from(Span::styled(&hunk.header, header_style)));
+        
+        for line in &hunk.lines {
+            lines.push(render_single_diff_line(line, is_active));
+        }
     }
+    lines
+}
 
-    // ── Track old/new line numbers across hunks ───────────────────────────────
-    let mut old_ln: u32 = 0;
-    let mut new_ln: u32 = 0;
-
-    content.lines().map(|raw_line| {
-        let line = raw_line.to_string();
-
-        // ── File header (diff --git, ---, +++) ───────────────────────────────
-        if line.starts_with("diff ") || line.starts_with("index ")
-            || line.starts_with("--- ") || line.starts_with("+++ ")
-        {
-            return Line::from(vec![
-                Span::styled("      ".to_string(), Style::default().fg(gutter_fg)),
-                Span::styled("  ".to_string(),      Style::default().fg(gutter_fg)),
-                Span::styled(line, Style::default().fg(file_fg).add_modifier(Modifier::BOLD)),
-            ]);
-        }
-
-        // ── Hunk header (@@ … @@) ────────────────────────────────────────────
-        if line.starts_with("@@") {
-            // Parse old/new start numbers from @@ -old,n +new,n @@
-            let parse = |s: &str, prefix: char| -> u32 {
-                s.split_whitespace()
-                 .find(|t| t.starts_with(prefix))
-                 .and_then(|t| t.trim_start_matches(prefix).split(',').next())
-                 .and_then(|n| n.parse::<u32>().ok())
-                 .unwrap_or(1)
-                 .saturating_sub(1)
-            };
-            old_ln = parse(&line, '-');
-            new_ln = parse(&line, '+');
-
-            return Line::from(vec![
-                Span::styled("      ".to_string(), Style::default().fg(gutter_fg).bg(hunk_bg)),
-                Span::styled("  ".to_string(),      Style::default().fg(gutter_fg).bg(hunk_bg)),
-                Span::styled(line, Style::default().fg(hunk_fg).bg(hunk_bg).add_modifier(Modifier::BOLD)),
-            ]);
-        }
-
-        // ── "\ No newline at end of file" ────────────────────────────────────
-        if line.starts_with('\\') {
-            return Line::from(Span::styled(
-                line,
-                Style::default().fg(meta_fg).add_modifier(Modifier::ITALIC),
-            ));
-        }
-
-        // ── Added line (+) ────────────────────────────────────────────────────
-        if line.starts_with('+') {
-            new_ln += 1;
-            let code = line[1..].to_string();
-            let gutter = format!("{:>3}   ", new_ln);
-            let mut spans = vec![
-                Span::styled(gutter, Style::default().fg(add_fg).bg(add_bg)),
-                Span::styled("+ ".to_string(), Style::default().fg(add_sym).bg(add_bg)
-                    .add_modifier(Modifier::BOLD)),
-            ];
-            spans.extend(syn!(&code, add_fg, Some(add_bg)));
-            return Line::from(spans);
-        }
-
-        // ── Deleted line (-) ─────────────────────────────────────────────────
-        if line.starts_with('-') {
-            old_ln += 1;
-            let code = line[1..].to_string();
-            let gutter = format!("{:>3}   ", old_ln);
-            let mut spans = vec![
-                Span::styled(gutter, Style::default().fg(del_fg).bg(del_bg)),
-                Span::styled("- ".to_string(), Style::default().fg(del_sym).bg(del_bg)
-                    .add_modifier(Modifier::BOLD)),
-            ];
-            spans.extend(syn!(&code, del_fg, Some(del_bg)));
-            return Line::from(spans);
-        }
-
-        // ── Context line (space) ──────────────────────────────────────────────
-        old_ln += 1;
-        new_ln += 1;
-        let code = if line.starts_with(' ') { line[1..].to_string() } else { line.clone() };
-        let gutter = format!("{:>3} {:>3}", old_ln, new_ln);
-        let mut spans = vec![
-            Span::styled(gutter, Style::default().fg(gutter_fg)),
-            Span::styled("   ".to_string(), Style::default().fg(gutter_fg)),
-        ];
-        spans.extend(syn!(&code, ctx_fg, None));
-        Line::from(spans)
-
-    }).collect()
+fn render_single_diff_line<'a>(line: &'a str, is_active: bool) -> Line<'a> {
+    let style = if line.starts_with('+') {
+        Style::default().fg(DIFF_ADD_FG).bg(if is_active { DIFF_ADD_BG } else { BG_COLOR })
+    } else if line.starts_with('-') {
+        Style::default().fg(DIFF_DEL_FG).bg(if is_active { DIFF_DEL_BG } else { BG_COLOR })
+    } else {
+        Style::default().fg(DIFF_CTX_FG).bg(if is_active { HIGHLIGHT_BG } else { BG_COLOR })
+    };
+    Line::from(Span::styled(line.to_string(), style))
 }
 
 // ── Footer ────────────────────────────────────────────────────────────────────
 
-fn render_footer(f: &mut Frame, area: Rect, s: &RepoViewState, editor_mode: bool) {
-    use ratatui::widgets::Paragraph;
-
-    if editor_mode {
-        f.render_widget(
-            Paragraph::new("Ctrl+S Save   Ctrl+X Close   ↑↓←→ Move   Tab Indent   1 Tree focus")
-                .style(Style::default().fg(BORDER_COLOR)),
-            area,
-        );
-        return;
-    }
-
-    if s.commit_mode {
-        f.render_widget(
-            Paragraph::new("Type commit message   Enter Confirm   Esc Cancel")
-                .style(Style::default().fg(ACCENT_COLOR)),
-            area,
-        );
-        return;
-    }
-
-    // Task 2 fix: always show keybinds. If there's a status_msg, show it on the
-    // same line using colour only — keybinds are always visible.
-    let keybinds = "↑↓ Nav   Enter Expand   Space Stage   s StageAll   e Edit   c Commit   p Push   P Pull   r Refresh   X Deinit   q Quit";
-
+fn render_footer(f: &mut Frame, area: Rect, s: &RepoViewState) {
+    let keybinds = " Space Stage/Unstage  s Stage All  c Commit  p Push  P Pull  e Edit  r Refresh  q Quit ";
     let (text, color) = if !s.status_msg.is_empty() {
-        let c = if s.status_msg.contains('✅') { SUCCESS_COLOR }
-                else if s.status_msg.contains('❌') { ERROR_COLOR }
-                else { WARNING_COLOR };
-        // Show status msg, keybinds in dimmer colour after a separator
+        let c = if s.status_msg.contains("❌") { ERROR_COLOR } else { SUCCESS_COLOR };
         (format!("{}   │   {}", s.status_msg, keybinds), c)
     } else {
         (keybinds.to_string(), BORDER_COLOR)

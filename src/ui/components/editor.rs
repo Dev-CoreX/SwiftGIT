@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -22,6 +22,8 @@ pub struct EditorState<'a> {
 }
 
 pub fn render(f: &mut Frame, area: Rect, s: &EditorState) {
+    f.render_widget(Clear, area); // Ensure no text from underneath is visible
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -79,10 +81,10 @@ pub fn render(f: &mut Frame, area: Rect, s: &EditorState) {
                     Span::styled(after, Style::default().fg(FG_COLOR).bg(HIGHLIGHT_BG)),
                 ])
             } else {
-                Line::from(vec![
-                    line_num,
-                    Span::styled(line_text.to_string(), Style::default().fg(FG_COLOR)),
-                ])
+                let highlighted = highlight_line(line_text);
+                let mut spans = vec![line_num];
+                spans.extend(highlighted);
+                Line::from(spans)
             }
         })
         .collect();
@@ -103,7 +105,7 @@ pub fn render(f: &mut Frame, area: Rect, s: &EditorState) {
 
     // Status line: position + hints
     let status_text = format!(
-        " Ln {}/{}  Col {}    Ctrl+S Save   Ctrl+X Close editor   ↑↓←→ Move",
+        " Ln {}/{}  Col {}    Ctrl+S Save   Ctrl+Q/X Close editor   ↑↓←→ Move",
         s.cursor_line + 1,
         s.lines.len(),
         s.cursor_col + 1,
@@ -113,4 +115,50 @@ pub fn render(f: &mut Frame, area: Rect, s: &EditorState) {
             .style(Style::default().fg(BORDER_COLOR)),
         chunks[1],
     );
+}
+
+fn highlight_line(line: &str) -> Vec<Span<'static>> {
+    if line.trim().starts_with("//") || line.trim().starts_with("///") || line.trim().starts_with("//!") {
+        return vec![Span::styled(line.to_string(), Style::default().fg(SYN_COMMENT))];
+    }
+
+    let mut spans = Vec::new();
+    let words: Vec<&str> = line.split_inclusive(|c: char| !c.is_alphanumeric() && c != '_').collect();
+
+    for word in words {
+        let trimmed = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
+        let style = if is_keyword(trimmed) {
+            Style::default().fg(SYN_KEYWORD)
+        } else if is_type(trimmed) {
+            Style::default().fg(SYN_TYPE)
+        } else if is_function_call(word) {
+            Style::default().fg(SYN_FUNCTION)
+        } else if trimmed.chars().all(|c| c.is_numeric()) {
+            Style::default().fg(SYN_NUMBER)
+        } else if word.starts_with('"') || word.ends_with('"') {
+            Style::default().fg(SYN_STRING)
+        } else if is_operator(word) {
+            Style::default().fg(SYN_OPERATOR)
+        } else {
+            Style::default().fg(FG_COLOR)
+        };
+        spans.push(Span::styled(word.to_string(), style));
+    }
+    spans
+}
+
+fn is_keyword(w: &str) -> bool {
+    matches!(w, "pub" | "fn" | "use" | "let" | "match" | "mut" | "if" | "else" | "impl" | "struct" | "enum" | "trait" | "type" | "for" | "in" | "while" | "loop" | "return" | "break" | "continue" | "as" | "async" | "await" | "mod" | "crate" | "self" | "Self" | "where")
+}
+
+fn is_type(w: &str) -> bool {
+    matches!(w, "String" | "Result" | "Option" | "Vec" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" | "f32" | "f64" | "bool" | "char" | "str" | "Path" | "PathBuf" | "Arc" | "Mutex")
+}
+
+fn is_function_call(w: &str) -> bool {
+    w.ends_with('(')
+}
+
+fn is_operator(w: &str) -> bool {
+    w.trim().chars().all(|c| matches!(c, '=' | '>' | '<' | '!' | '&' | '|' | '+' | '-' | '*' | '/' | '%' | '^' | ':'))
 }

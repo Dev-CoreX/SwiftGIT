@@ -198,11 +198,11 @@ pub fn ensure_key_in_agent(key_path: &Path) -> Result<()> {
 /// https://github.com/user/repo      →  git@github.com:user/repo.git
 /// git@github.com:user/repo.git      →  (unchanged)
 pub fn to_ssh_url(url: &str) -> String {
-    let url = url.trim().trim_end_matches('/');
+    let url = crate::git::GitRepo::clean_url(url.trim().trim_end_matches('/'));
 
     // Already SSH
     if url.starts_with("git@github.com:") {
-        return ensure_git_suffix(url);
+        return ensure_git_suffix(&url);
     }
 
     // HTTPS → SSH
@@ -226,23 +226,20 @@ fn ensure_git_suffix(s: &str) -> String {
 pub fn parse_github_url(url: &str) -> Option<(String, String)> {
     let url = url.trim().trim_end_matches('/').trim_end_matches(".git");
 
-    // SSH: git@github.com:owner/repo
-    if let Some(rest) = url.strip_prefix("git@github.com:") {
-        let parts: Vec<&str> = rest.splitn(2, '/').collect();
-        if parts.len() == 2 {
-            return Some((parts[0].to_string(), parts[1].to_string()));
-        }
-    }
+    let path = if let Some(rest) = url.strip_prefix("git@github.com:") {
+        rest
+    } else if let Some(rest) = url.strip_prefix("https://github.com/") {
+        rest
+    } else {
+        return None;
+    };
 
-    // HTTPS: https://github.com/owner/repo
-    if let Some(rest) = url.strip_prefix("https://github.com/") {
-        let parts: Vec<&str> = rest.splitn(2, '/').collect();
-        if parts.len() == 2 {
-            return Some((parts[0].to_string(), parts[1].to_string()));
-        }
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() >= 2 {
+        Some((parts[0].to_string(), parts[1].to_string()))
+    } else {
+        None
     }
-
-    None
 }
 
 // ── PAT validation ────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-//! GhGrab file picker — one-level collapsible tree, file icons, MB sizes.
+//! Remote File Picker — one-level collapsible tree, file icons, MB sizes.
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use std::collections::HashSet;
-use crate::git::GhFile;
+use crate::git::RemoteFile;
 use crate::ui::theme::*;
 use crate::ui::spinner_char;
 
@@ -52,7 +52,7 @@ fn file_icon(name: &str) -> &'static str {
     }
 }
 
-// ── Task 2: MB formatter (2 decimal places) ───────────────────────────────────
+// ── MB formatter (2 decimal places) ───────────────────────────────────
 
 fn format_size(bytes: u64) -> String {
     if bytes == 0 { return "  0.00 MB".to_string(); }
@@ -76,14 +76,14 @@ enum TreeItem {
 }
 
 /// Build one-level-at-a-time tree from flat file list + expanded set
-fn build_tree(files: &[GhFile], expanded: &HashSet<String>) -> Vec<TreeItem> {
+fn build_tree(files: &[RemoteFile], expanded: &HashSet<String>) -> Vec<TreeItem> {
     let mut items = Vec::new();
     build_tree_level(files, expanded, "", 0, &mut items);
     items
 }
 
 fn build_tree_level(
-    files:    &[GhFile],
+    files:    &[RemoteFile],
     expanded: &HashSet<String>,
     parent:   &str,
     depth:    usize,
@@ -147,7 +147,7 @@ pub fn render(
     frame_count: u64,
     owner: &str,
     repo: &str,
-    files: &[GhFile],
+    files: &[RemoteFile],
     cursor: usize,
     scroll: usize,
     selected: &HashSet<usize>,
@@ -168,7 +168,7 @@ pub fn render(
     f.render_widget(
         Paragraph::new(format!("  {}/{} — {} files{}  (Space=select  Enter=expand  a=clone all)", owner, repo, files.len(), spin))
             .block(Block::default().borders(Borders::ALL)
-                .title(" GhGrab — File Picker ")
+                .title(" Remote Picker — Selective Download ")
                 .border_style(Style::default().fg(ACCENT_COLOR))
                 .style(Style::default().bg(BG_COLOR)))
             .style(Style::default().fg(FG_COLOR).add_modifier(Modifier::BOLD)),

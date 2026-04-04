@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct SwiftGitConfig {
     pub github_token: Option<String>,
     /// GitHub username — used for API calls
@@ -12,6 +12,18 @@ pub struct SwiftGitConfig {
     /// Whether the SSH key has been confirmed added to GitHub
     pub ssh_key_added: bool,
     pub recent_projects: Vec<RecentProject>,
+}
+
+impl std::fmt::Debug for SwiftGitConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SwiftGitConfig")
+            .field("github_token", &self.github_token.as_ref().map(|_| "[REDACTED]"))
+            .field("username", &self.username)
+            .field("display_name", &self.display_name)
+            .field("ssh_key_added", &self.ssh_key_added)
+            .field("recent_projects", &self.recent_projects)
+            .finish()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -46,8 +58,26 @@ impl SwiftGitConfig {
         }
         let contents = serde_json::to_string_pretty(self)
             .context("Failed to serialize config")?;
-        std::fs::write(&path, contents)
+        
+        // Atomic write with secure permissions
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .with_context(|| format!("Failed to open config for writing: {}", path.display()))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))
+                .context("Failed to set config permissions")?;
+        }
+
+        file.write_all(contents.as_bytes())
             .with_context(|| format!("Failed to write config: {}", path.display()))?;
+        
         Ok(())
     }
 

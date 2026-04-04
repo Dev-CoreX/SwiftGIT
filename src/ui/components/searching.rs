@@ -70,8 +70,7 @@ pub fn render(f: &mut Frame, area: Rect, frame_count: u64, status_msg: &str) {
     .style(Style::default().bg(BG_COLOR));
     f.render_widget(status, vertical[2]);
 
-    let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let spinner_char = spinner_frames[(frame_count / 2) as usize % spinner_frames.len()];
+    let spinner_char = crate::ui::spinner_char(frame_count);
 
     let spinner_col = Layout::default()
         .direction(Direction::Horizontal)

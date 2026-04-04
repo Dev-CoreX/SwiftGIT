@@ -64,9 +64,9 @@ pub fn render(
 
     let display_len = token_input.chars().count();
     let masked: String = if display_len > 0 {
-        let visible_start = token_input.chars().take(4).collect::<String>();
-        let dots = "•".repeat(display_len.saturating_sub(4).min(20));
-        format!("{}{}", visible_start, dots)
+        let dots = "•".repeat(display_len.saturating_sub(4));
+        let visible_end = token_input.chars().skip(display_len.saturating_sub(4)).collect::<String>();
+        format!("{}{}", dots, visible_end)
     } else {
         String::new()
     };
