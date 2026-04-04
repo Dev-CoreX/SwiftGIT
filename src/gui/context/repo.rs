@@ -92,7 +92,7 @@ impl Context for RepoContext {
                     s.hunk_cursor = Some(next);
                 }
             }
-            KeyCode::BackTab | KeyCode::Char('p') if !event.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::BackTab if !event.modifiers.contains(KeyModifiers::CONTROL) => {
                 let mut s = model.lock().await;
                 if !s.diff_struct.hunks.is_empty() {
                     let prev = match s.hunk_cursor {
@@ -176,10 +176,56 @@ impl Context for RepoContext {
                 }
             }
             KeyCode::Char('p') => {
-                // For now, we still trigger AppMode::PushDialog
-                let mut s = model.lock().await;
-                s.mode = AppMode::PushDialog;
-                return Ok(false); 
+                let root_opt = {
+                    let s = model.lock().await;
+                    s.repo.as_ref().map(|r| r.root.clone())
+                };
+                
+                if let Some(root) = root_opt {
+                    let repo = crate::git::GitRepo { root: root.clone() };
+                    let repo_name = repo.repo_name();
+                    let branch = repo.current_branch().unwrap_or_else(|_| "main".to_string());
+                    let remote_url = repo.get_remote_url().unwrap_or_default();
+                    let has_commits = repo.has_commits();
+                    let recent_commits = crate::git::recent_commits(&root, 5);
+                    
+                    // Get local branches
+                    let branches = std::process::Command::new("git")
+                        .args(["branch", "--format=%(refname:short)"])
+                        .current_dir(&root)
+                        .output()
+                        .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(|s| s.to_string()).collect::<Vec<_>>())
+                        .unwrap_or_else(|_| vec![branch.clone()]);
+
+                    let mut s = model.lock().await;
+                    s.push_dlg.repo_name = repo_name;
+                    s.push_dlg.branch = branch;
+                    s.push_dlg.branch_list = branches;
+                    s.push_dlg.origin = remote_url;
+                    s.push_dlg.has_commits = has_commits;
+                    
+                    // Default commit msg to last commit message
+                    if let Some(last) = recent_commits.first() {
+                        if let Some((_hash, msg)) = last.split_once(' ') {
+                            s.push_dlg.commit_msg = msg.to_string();
+                        } else {
+                            s.push_dlg.commit_msg = last.clone();
+                        }
+                    } else {
+                        s.push_dlg.commit_msg.clear();
+                    }
+
+                    s.push_dlg.recent_commits = recent_commits;
+                    s.push_dlg.username = s.config.username.clone().unwrap_or_default();
+                    s.push_dlg.status_msg.clear();
+                    s.push_dlg.force_push = false;
+                    s.push_dlg.focused = crate::ui::components::push_dialog::PushField::RepoName;
+                    s.push_dlg.cursor = s.push_dlg.repo_name.chars().count();
+                    s.push_dlg.update_origin();
+                    
+                    s.mode = AppMode::PushDialog;
+                }
+                return Ok(true);
             }
             KeyCode::Char('P') => {
                 let (token, root, already_loading) = {

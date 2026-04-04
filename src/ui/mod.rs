@@ -512,6 +512,12 @@ pub fn render_deinit_confirm(f: &mut ratatui::Frame, area: ratatui::layout::Rect
             .style(deinit_style),
         btns[1],
     );
+
+    // Hint
+    let hint = Paragraph::new("←→ Select   Enter Confirm   ? Help   Esc Cancel")
+        .alignment(ratatui::layout::Alignment::Center)
+        .style(Style::default().fg(theme::BORDER_COLOR));
+    f.render_widget(hint, rows[0]); // Re-use first empty row for hint
 }
 
 pub fn render_force_push_confirm(f: &mut ratatui::Frame, area: ratatui::layout::Rect, cursor: usize) {
@@ -593,6 +599,12 @@ pub fn render_force_push_confirm(f: &mut ratatui::Frame, area: ratatui::layout::
             .style(force_style),
         btns[1],
     );
+
+    // Hint
+    let hint = Paragraph::new("←→ Select   Enter Confirm   ? Help   Esc Cancel")
+        .alignment(ratatui::layout::Alignment::Center)
+        .style(Style::default().fg(theme::BORDER_COLOR));
+    f.render_widget(hint, rows[0]);
 }
 
 fn install_panic_hook() {

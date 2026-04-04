@@ -258,7 +258,7 @@ pub fn render(f: &mut Frame, area: Rect, s: &PushDialogState) {
                 else { WARNING_COLOR };
         (s.status_msg.as_str(), c)
     } else {
-        ("Tab/↑↓ Fields   Enter/Space Branch   Ctrl+F Force Push   Enter Push   Esc Cancel", BORDER_COLOR)
+        ("Tab/↑↓ Fields   Enter/Space Branch   Ctrl+F Force Push   Enter Push   ? Help   Esc Cancel", BORDER_COLOR)
     };
 
     f.render_widget(

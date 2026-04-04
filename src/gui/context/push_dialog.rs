@@ -90,6 +90,7 @@ impl Context for PushDialogContext {
                 } else {
                     s.mode = AppMode::RepoView;
                 }
+                return Ok(true);
             }
             KeyCode::Tab | KeyCode::Down => {
                 if s.push_dlg.branch_open {
@@ -121,6 +122,7 @@ impl Context for PushDialogContext {
                     drop(s);
                     self.trigger_push(Arc::clone(&model)).await;
                 }
+                return Ok(true);
             }
             KeyCode::Char(' ') if s.push_dlg.focused == PushField::Branch => {
                 s.push_dlg.branch_open = !s.push_dlg.branch_open;
@@ -143,10 +145,10 @@ impl Context for PushDialogContext {
 
 impl PushDialogContext {
     async fn trigger_push(&self, model: Arc<Mutex<Model>>) {
-        let (token, root, repo_name, branch, username, force_push, _frame_count, already_loading) = {
+        let (token, root, repo_name, branch, username, force_push, commit_msg, _frame_count, already_loading) = {
             let mut s = model.lock().await;
             if s.is_loading {
-                (None, None, String::new(), String::new(), String::new(), false, 0, true)
+                (None, None, String::new(), String::new(), String::new(), false, String::new(), 0, true)
             } else {
                 let repo_name = s.push_dlg.repo_name.trim().to_string();
                 let branch    = s.push_dlg.branch.trim().to_string();
@@ -154,11 +156,12 @@ impl PushDialogContext {
                 let root      = s.repo.as_ref().map(|r| r.root.clone());
                 let username  = s.config.username.clone().unwrap_or_default();
                 let force_push = s.push_dlg.force_push;
+                let commit_msg = s.push_dlg.commit_msg.trim().to_string();
                 let fc        = s.frame_count;
                 s.push_dlg.status_msg = format!("{} Pushing…", spinner_char(fc));
                 s.loading_label = "Pushing to remote".to_string();
                 s.is_loading = true;
-                (token, root, repo_name, branch, username, force_push, fc, false)
+                (token, root, repo_name, branch, username, force_push, commit_msg, fc, false)
             }
         };
 
@@ -199,11 +202,20 @@ impl PushDialogContext {
         let branch_c   = branch.clone();
         let username_c = username.clone();
         let repo_c     = repo_name.clone();
+        let msg_c      = commit_msg.clone();
 
         tokio::task::spawn(async move {
             let u_captured = username_c.clone();
             let r_captured = repo_c.clone();
             let result = tokio::task::spawn_blocking(move || {
+                let repo = crate::git::GitRepo { root: root_c.clone() };
+                
+                // If there are staged files and a message is provided, commit first
+                let staged = repo.status().unwrap_or_default().into_iter().any(|f| f.status.is_staged());
+                if staged && !msg_c.is_empty() {
+                    let _ = repo.commit(&msg_c);
+                }
+
                 if crate::auth::test_ssh_github().is_ok() {
                     let _ = crate::auth::set_remote_ssh(&root_c, &u_captured, &r_captured);
                     crate::auth::push_via_ssh(&root_c, &branch_c, force_push)

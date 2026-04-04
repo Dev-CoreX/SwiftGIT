@@ -182,7 +182,7 @@ pub fn render(
     }
 
     // ── Controls ─────────────────────────────────────────────────────
-    let controls = Paragraph::new("↑↓ Navigate   Enter Select   Ctrl+W Settings   q Quit")
+    let controls = Paragraph::new("↑↓ Navigate   Enter Select   Ctrl+W Settings   ? Help   q Quit")
         .alignment(Alignment::Center)
         .style(Style::default().fg(BORDER_COLOR));
     f.render_widget(controls, vertical[7]);

@@ -382,7 +382,7 @@ fn render_single_diff_line<'a>(line: &'a str, is_active: bool) -> Line<'a> {
 // ── Footer ────────────────────────────────────────────────────────────────────
 
 fn render_footer(f: &mut Frame, area: Rect, s: &RepoViewState) {
-    let keybinds = " Space Stage/Unstage  s Stage All  c Commit  p Push  P Pull  e Edit  r Refresh  q Quit ";
+    let keybinds = " Space Stage  s All  c Commit  p Push  P Pull  e Edit  r Refresh  / Filter  ? Help  q Quit ";
     let (text, color) = if !s.status_msg.is_empty() {
         let c = if s.status_msg.contains("❌") { ERROR_COLOR } else { SUCCESS_COLOR };
         (format!("{}   │   {}", s.status_msg, keybinds), c)

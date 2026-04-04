@@ -302,7 +302,7 @@ pub fn render(
 
     // Footer
     f.render_widget(
-        Paragraph::new("↑↓ Navigate   Enter Expand/Collapse folder   Space Select file   d Download selected   a Clone all   Esc Back")
+        Paragraph::new("↑↓ Navigate   Enter Expand/Collapse   Space Select   d Download   a Clone all   ? Help   Esc Back")
             .alignment(Alignment::Center)
             .style(Style::default().fg(BORDER_COLOR)),
         main[2],
